@@ -21,19 +21,20 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-// Cambio de prueba
-
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef union {
+	float float_freq;
+	uint8_t bytes_freq[4];
+} osc_freq_union;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define clk_freq	80000000.0	// 80 MHz
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,6 +50,15 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
+// OSCILLATOR FREQUENCY (TIM) VARIABLES
+volatile uint32_t ic_t1 = 0;	// Input capture (ic) initial time (in timer counter ticks)
+volatile uint32_t ic_t2 = 0;	// Input capture (ic) final time (in timer counter ticks)
+volatile uint32_t diff = 0;		// Period between ic_t1 and ic_t2 in timer ticks
+volatile uint16_t first_ic = 1;	// ic_t1 input capture flag
+volatile osc_freq_union osc_freq;	// Oscillator frequency
+
+// I2C VARIABLES
+uint8_t i2c_tx_buffer[4];	// 32-bit transmit buffer osc_freq (float) variable for I2C bus
 
 /* USER CODE END PV */
 
@@ -100,6 +110,13 @@ int main(void)
   MX_I2C1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  // TIMER
+  HAL_TIM_Base_Start(&htim2);
+
+  // COMPARATOR (OSCILLATOR)
+  HAL_COMP_Start_IT(&hcomp2);	// Starts the oscillator with external interrupt enabled
+
+  HAL_I2C_Slave_Transmit_IT(&hi2c1, i2c_tx_buffer, 4);
 
   /* USER CODE END 2 */
 
@@ -107,6 +124,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  // HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);	// Enters sleepMode and waits for interrupt
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -137,7 +155,13 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -147,12 +171,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -177,11 +201,11 @@ static void MX_COMP2_Init(void)
   hcomp2.Init.InvertingInput = COMP_INPUT_MINUS_IO3;
   hcomp2.Init.NonInvertingInput = COMP_INPUT_PLUS_IO3;
   hcomp2.Init.OutputPol = COMP_OUTPUTPOL_NONINVERTED;
-  hcomp2.Init.Hysteresis = COMP_HYSTERESIS_NONE;
+  hcomp2.Init.Hysteresis = COMP_HYSTERESIS_HIGH;
   hcomp2.Init.BlankingSrce = COMP_BLANKINGSRC_NONE;
   hcomp2.Init.Mode = COMP_POWERMODE_HIGHSPEED;
   hcomp2.Init.WindowMode = COMP_WINDOWMODE_DISABLE;
-  hcomp2.Init.TriggerMode = COMP_TRIGGERMODE_NONE;
+  hcomp2.Init.TriggerMode = COMP_TRIGGERMODE_IT_RISING;
   if (HAL_COMP_Init(&hcomp2) != HAL_OK)
   {
     Error_Handler();
@@ -208,14 +232,14 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00100D14;
-  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.Timing = 0x10D19CE4;
+  hi2c1.Init.OwnAddress1 = 100;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
   hi2c1.Init.OwnAddress2 = 0;
   hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
   hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_ENABLE;
   if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
     Error_Handler();
@@ -252,8 +276,8 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_IC_InitTypeDef sConfigIC = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
 
@@ -264,21 +288,18 @@ static void MX_TIM2_Init(void)
   htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_IC_Init(&htim2) != HAL_OK)
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
-  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-  sConfigIC.ICFilter = 0;
-  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -308,7 +329,88 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_COMP_TriggerCallback(COMP_HandleTypeDef *hcomp)
+{
+	if(hcomp->Instance == COMP2)
+	{
+		if(first_ic == 1)
+		{
+			ic_t1 = __HAL_TIM_GET_COUNTER(&htim2);
+			first_ic = 0;
+		}
+		else
+		{
+			ic_t2 = __HAL_TIM_GET_COUNTER(&htim2);
+			diff = (ic_t2 > ic_t1) ? (ic_t2 - ic_t1) : (0xFFFFFFFF - ic_t1 + ic_t2 + 1);
+		}
 
+		osc_freq.float_freq = clk_freq / (float)diff;
+
+		i2c_tx_buffer[0] = osc_freq.bytes_freq[0];
+		i2c_tx_buffer[1] = osc_freq.bytes_freq[1];
+		i2c_tx_buffer[2] = osc_freq.bytes_freq[2];
+		i2c_tx_buffer[3] = osc_freq.bytes_freq[3];
+
+		ic_t1 = ic_t2;
+	}
+}
+
+/* void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+	// Checks for timer 2 and channel 2 in case other timers/channels are enabled in the future
+	if(htim->Instance == TIM2 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+	{
+		// Checks if it is goint to read ic_t1
+		if(first_ic == 1)
+		{
+			ic_t1 = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);	// Reads captured value as ic_t1
+			first_ic = 0;	// Clears the first_ic flag so it reads ic_t2 on the next input capture (ic)
+		}
+		else
+		{
+			ic_t2 = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);	// Reads cptured value as ic_t2
+			diff = (ic_t1 < ic_t2) ? (ic_t2 - ic_t1):(0xFFFFFFFF - ic_t1 + ic_t2);
+			 *
+			 * Signal period in ticks is t2-t1 if t2>t1 and 0xFFFF_FFFF - t1 + t2 if t1 > t2
+			 * NOTE: It is no necessary to check for other scenarios, because 32 bits timer period at 80[MHz] is 53.687[s] which would be equivalent to 3.87 [mF]
+			 *
+			osc_freq.float_freq = clk_freq/diff; // Calculates signal freqeuency
+
+			// I2C Transmitt (tx) buffer update
+			i2c_tx_buffer[0] = osc_freq.bytes_freq[0];
+			i2c_tx_buffer[1] = osc_freq.bytes_freq[1];
+			i2c_tx_buffer[2] = osc_freq.bytes_freq[2];
+			i2c_tx_buffer[3] = osc_freq.bytes_freq[3];
+
+			// Setup for next osc_freq calculation
+			__HAL_TIM_SET_COUNTER(htim, 0);	// Resets timer counter to 0
+			first_ic = 1;	// Sets the first_ic flag so it waits awain for the ic_t1 value
+		}
+	}
+
+}
+*/
+
+void HAL_I2C_AddrCallback(I2C_HandleTypeDef *hi2c, uint8_t transfer_direction, uint16_t address)
+{
+	if(hi2c->Instance == I2C1)
+	{
+		if(transfer_direction == I2C_DIRECTION_TRANSMIT)
+		{
+			HAL_I2C_Slave_Seq_Transmit_IT(hi2c, i2c_tx_buffer, 4, I2C_FIRST_AND_LAST_FRAME);
+		}
+	}
+}
+
+void HAL_I2C_SlaveTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+	if(hi2c->Instance == I2C1)
+		{
+			// The Pico just finished reading the data.
+			// Immediately preload the buffer again for the next read request!
+			HAL_I2C_Slave_Transmit_IT(&hi2c1, i2c_tx_buffer, 4);
+		}
+}
 /* USER CODE END 4 */
 
 /**
